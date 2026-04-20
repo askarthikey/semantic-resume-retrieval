@@ -94,3 +94,22 @@ export type ResumeDetail = {
   upload_timestamp: string;
   file_storage?: ResumeFileStorage;
 };
+
+export type UserProfile = {
+  user_id: string;
+  email: string;
+  created_at: string;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: UserProfile;
+};
+
+export type Workspace = {
+  workspace_id: string;
+  name: string;
+  created_at: string;
+};

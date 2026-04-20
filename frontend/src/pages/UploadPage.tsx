@@ -4,6 +4,7 @@ import { getApiErrorMessage } from "../api/client";
 import { createUploadJob, getUploadJobStatus } from "../api/resumes";
 import type { UploadJobStatusResponse } from "../api/types";
 import { Toast } from "../components/Toast";
+import { useWorkspace } from "../contexts/WorkspaceContext";
 
 type ToastState = {
   message: string;
@@ -18,6 +19,7 @@ type UploadItemState = {
 };
 
 export function UploadPage() {
+  const { selectedWorkspaceId, selectedWorkspace } = useWorkspace();
   const [items, setItems] = useState<UploadItemState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -78,6 +80,10 @@ export function UploadPage() {
   }
 
   async function handleUpload() {
+    if (!selectedWorkspaceId) {
+      setToast({ kind: "error", message: "Create or select a workspace before uploading." });
+      return;
+    }
     if (items.length === 0) return;
     setIsUploading(true);
     setItems((prev) => prev.map((item) => ({ ...item, status: "uploading", progress: 20, error: undefined })));
@@ -129,6 +135,7 @@ export function UploadPage() {
         <p className="mt-2 max-w-3xl text-slate-600">
           Drop PDFs or plain text resumes and we will parse, clean, embed, and index them for semantic search.
         </p>
+        <p className="mt-1 text-sm font-semibold text-slate-500">Workspace: {selectedWorkspace?.name ?? "None"}</p>
       </header>
 
       <div className="rounded-3xl border border-dashed border-sky-300 bg-gradient-to-br from-sky-50 to-cyan-50 p-8">

@@ -5,6 +5,7 @@ import { getResumeDetail, searchResumes } from "../api/resumes";
 import type { ResumeDetail, SearchResult } from "../api/types";
 import { ResumeModal } from "../components/ResumeModal";
 import { Toast } from "../components/Toast";
+import { useWorkspace } from "../contexts/WorkspaceContext";
 
 type ToastState = {
   message: string;
@@ -14,6 +15,7 @@ type ToastState = {
 const topKOptions = [5, 10, 20];
 
 export function SearchPage() {
+  const { selectedWorkspaceId, selectedWorkspace } = useWorkspace();
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(10);
   const [isSearching, setIsSearching] = useState(false);
@@ -27,6 +29,10 @@ export function SearchPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
 
   async function handleSearch() {
+    if (!selectedWorkspaceId) {
+      setToast({ kind: "error", message: "Create or select a workspace before searching." });
+      return;
+    }
     if (!query.trim()) {
       setToast({ kind: "error", message: "Type a search query first." });
       return;
@@ -68,6 +74,7 @@ export function SearchPage() {
         <p className="mt-2 max-w-3xl text-slate-600">
           Ask in natural language and rank resumes by semantic relevance, not raw keyword overlap.
         </p>
+        <p className="mt-1 text-sm font-semibold text-slate-500">Workspace: {selectedWorkspace?.name ?? "None"}</p>
       </header>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">

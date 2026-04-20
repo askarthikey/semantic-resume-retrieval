@@ -7,10 +7,13 @@ from pymongo import MongoClient
 
 from app.config import get_settings
 from app.repositories.faiss_repository import FaissRepository
+from app.repositories.identity_repository import MongoIdentityRepository
 from app.repositories.mongo_repository import MongoUploadJobRepository
 from app.repositories.mongo_repository import MongoResumeRepository
 from app.repositories.supabase_storage_repository import SupabaseStorageRepository
+from app.routers.auth import router as auth_router
 from app.routers.resumes import router as resumes_router
+from app.routers.workspaces import router as workspaces_router
 from app.services.embedding_service import EmbeddingService
 from app.state.container import AppContainer
 
@@ -22,11 +25,22 @@ async def lifespan(fastapi_app: FastAPI):
     database = mongo_client[settings.mongo_db_name]
     collection = database["resumes"]
     upload_jobs_collection = database["upload_jobs"]
+    users_collection = database["users"]
+    workspaces_collection = database["workspaces"]
+    memberships_collection = database["workspace_memberships"]
+
+    identity_repository = MongoIdentityRepository(
+        users_collection=users_collection,
+        workspaces_collection=workspaces_collection,
+        memberships_collection=memberships_collection,
+    )
+    identity_repository.ensure_indexes()
 
     container = AppContainer(
         mongo_client=mongo_client,
         mongo_repository=MongoResumeRepository(collection),
         upload_job_repository=MongoUploadJobRepository(upload_jobs_collection),
+        identity_repository=identity_repository,
         faiss_repository=FaissRepository(
             index_path=settings.faiss_index_path,
             idmap_path=settings.faiss_idmap_path,
@@ -62,6 +76,8 @@ app.add_middleware(
 )
 
 app.include_router(resumes_router)
+app.include_router(auth_router)
+app.include_router(workspaces_router)
 
 
 @app.get("/health")

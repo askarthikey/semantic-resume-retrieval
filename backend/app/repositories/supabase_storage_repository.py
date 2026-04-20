@@ -23,13 +23,20 @@ class SupabaseStorageRepository:
         self.signed_url_ttl_seconds = max(60, int(signed_url_ttl_seconds))
         self.client: Client = create_client(url, service_role_key)
 
-    def upload_resume(self, filename: str, content: bytes, content_type: str | None = None) -> dict[str, str | int]:
+    def upload_resume(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, str | int]:
         if not content:
             raise ValueError("Uploaded file is empty")
 
         safe_name = self._sanitize_filename(filename)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        object_key = f"{self.path_prefix}/{timestamp}-{uuid4().hex}-{safe_name}"
+        workspace_prefix = f"/{workspace_id.strip('/')}" if workspace_id else ""
+        object_key = f"{self.path_prefix}{workspace_prefix}/{timestamp}-{uuid4().hex}-{safe_name}"
         mime_type = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         self.client.storage.from_(self.bucket).upload(

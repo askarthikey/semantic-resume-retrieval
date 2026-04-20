@@ -4,6 +4,7 @@ import { getApiErrorMessage } from "../api/client";
 import { deleteResume, listResumes } from "../api/resumes";
 import type { ResumeListItem } from "../api/types";
 import { Toast } from "../components/Toast";
+import { useWorkspace } from "../contexts/WorkspaceContext";
 
 type ToastState = {
   message: string;
@@ -13,6 +14,7 @@ type ToastState = {
 const PAGE_SIZE = 10;
 
 export function ResumesPage() {
+  const { selectedWorkspaceId, selectedWorkspace } = useWorkspace();
   const [items, setItems] = useState<ResumeListItem[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -20,6 +22,13 @@ export function ResumesPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
 
   async function loadPage(nextPage: number, options?: { showLoading?: boolean }) {
+    if (!selectedWorkspaceId) {
+      setItems([]);
+      setPage(1);
+      setTotalPages(1);
+      setLoading(false);
+      return;
+    }
     if (options?.showLoading ?? true) {
       setLoading(true);
     }
@@ -40,7 +49,7 @@ export function ResumesPage() {
       void loadPage(1, { showLoading: false });
     }, 0);
     return () => clearTimeout(timer);
-  }, []);
+  }, [selectedWorkspaceId]);
 
   async function handleDelete(mongoId: string) {
     try {
@@ -57,6 +66,7 @@ export function ResumesPage() {
       <header>
         <h1 className="text-3xl font-bold text-slate-900">Resume Inventory</h1>
         <p className="mt-2 text-slate-600">Browse all indexed resumes and remove stale profiles with one click.</p>
+        <p className="mt-1 text-sm font-semibold text-slate-500">Workspace: {selectedWorkspace?.name ?? "None"}</p>
       </header>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

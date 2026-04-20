@@ -1,8 +1,11 @@
 import math
 from uuid import uuid4
 
+from bson import ObjectId
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
+from app.auth.dependencies import get_current_user, get_current_workspace_id
+from app.models.auth import UserProfile
 from app.models.api import (
     DeleteResponse,
     ResumeFileStorageInfo,
@@ -87,26 +90,37 @@ def serialize_job_status(job_id: str, doc: dict) -> UploadJobStatusResponse:
 
 async def process_upload_job(container: AppContainer, job_id: str) -> None:
     repo = container.upload_job_repository
-    job_doc = repo.get_job(job_id)
+    if not ObjectId.is_valid(job_id):
+        return
+
+    job_doc = container.upload_job_repository.collection.find_one({"_id": ObjectId(job_id)})
+    if not job_doc:
+        return
+
+    workspace_id = job_doc.get("workspace_id")
+    if not workspace_id:
+        return
+
+    job_doc = repo.get_job(job_id, workspace_id)
     if not job_doc:
         return
 
     pending_files = [item for item in job_doc.get("files", []) if item.get("status") == "pending"]
     if not pending_files:
-        repo.finalize_job(job_id)
+        repo.finalize_job(job_id, workspace_id)
         return
 
-    repo.mark_started(job_id)
+    repo.mark_started(job_id, workspace_id)
     for file_info in pending_files:
         file_id = file_info.get("file_id")
         filename = file_info.get("filename") or "unknown_file"
         object_key = file_info.get("storage_object_key")
         if not file_id or not object_key:
             if file_id:
-                repo.mark_file_error(job_id, file_id, "Storage metadata missing")
+                repo.mark_file_error(job_id, file_id, "Storage metadata missing", workspace_id)
             continue
 
-        repo.mark_file_processing(job_id, file_id)
+        repo.mark_file_processing(job_id, file_id, workspace_id)
         mongo_id: str | None = None
         try:
             file_bytes = container.storage_repository.download_object(object_key)
@@ -120,6 +134,7 @@ async def process_upload_job(container: AppContainer, job_id: str) -> None:
 
             async with container.write_lock:
                 mongo_id = container.mongo_repository.create_resume(
+                    workspace_id=workspace_id,
                     filename=filename,
                     candidate_name=candidate_name,
                     raw_text=cleaned_text,
@@ -129,23 +144,25 @@ async def process_upload_job(container: AppContainer, job_id: str) -> None:
                     storage_size_bytes=file_info.get("storage_size_bytes"),
                 )
                 container.faiss_repository.add(vector, mongo_id)
-            repo.mark_file_success(job_id, file_id, mongo_id, candidate_name)
+            repo.mark_file_success(job_id, file_id, mongo_id, candidate_name, workspace_id)
         except Exception as exc:
             if mongo_id:
-                container.mongo_repository.soft_delete_resume(mongo_id)
+                container.mongo_repository.soft_delete_resume(mongo_id, workspace_id)
             try:
                 container.storage_repository.delete_object(object_key)
             except Exception:
                 pass
-            repo.mark_file_error(job_id, file_id, str(exc))
+            repo.mark_file_error(job_id, file_id, str(exc), workspace_id)
 
-    repo.finalize_job(job_id)
+    repo.finalize_job(job_id, workspace_id)
 
 
 @router.post("/upload", response_model=UploadJobAcceptedResponse, status_code=202)
 async def upload_resumes(
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> UploadJobAcceptedResponse:
     job_files: list[dict] = []
@@ -173,6 +190,7 @@ async def upload_resumes(
                 filename=filename,
                 content=file_bytes,
                 content_type=file.content_type,
+                workspace_id=workspace_id,
             )
             job_files.append(
                 {
@@ -200,11 +218,11 @@ async def upload_resumes(
                 }
             )
 
-    job_id = container.upload_job_repository.create_job(job_files)
+    job_id = container.upload_job_repository.create_job(job_files, workspace_id)
     if any(item.get("status") == "pending" for item in job_files):
         background_tasks.add_task(process_upload_job, container, job_id)
 
-    job_doc = container.upload_job_repository.get_job(job_id)
+    job_doc = container.upload_job_repository.get_job(job_id, workspace_id)
     current_status = "queued"
     if job_doc:
         current_status = str(job_doc.get("status", "queued"))
@@ -220,9 +238,11 @@ async def upload_resumes(
 @router.get("/upload-jobs/{job_id}", response_model=UploadJobStatusResponse)
 def get_upload_job_status(
     job_id: str,
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> UploadJobStatusResponse:
-    doc = container.upload_job_repository.get_job(job_id)
+    doc = container.upload_job_repository.get_job(job_id, workspace_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Upload job not found")
     return serialize_job_status(job_id, doc)
@@ -231,6 +251,8 @@ def get_upload_job_status(
 @router.post("/search", response_model=SearchResponse)
 def search_resumes(
     payload: SearchRequest,
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> SearchResponse:
     query = payload.query.strip()
@@ -252,7 +274,7 @@ def search_resumes(
         mongo_id = container.faiss_repository.id_map[faiss_id]
         ranked_candidates.append((int(faiss_id), float(score), mongo_id))
 
-    docs_map = container.mongo_repository.get_resumes_by_ids([item[2] for item in ranked_candidates])
+    docs_map = container.mongo_repository.get_resumes_by_ids([item[2] for item in ranked_candidates], workspace_id)
 
     results: list[SearchResultItem] = []
     rank = 1
@@ -283,12 +305,14 @@ def search_resumes(
 def list_resumes(
     page: int = 1,
     page_size: int = 20,
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> ResumeListResponse:
     if page < 1 or page_size < 1 or page_size > 100:
         raise HTTPException(status_code=400, detail="Invalid pagination parameters")
 
-    docs, total = container.mongo_repository.list_resumes(page=page, page_size=page_size)
+    docs, total = container.mongo_repository.list_resumes(page=page, page_size=page_size, workspace_id=workspace_id)
     total_pages = max(1, math.ceil(total / page_size))
 
     items = [
@@ -314,9 +338,11 @@ def list_resumes(
 @router.get("/{resume_id}", response_model=ResumeDetailResponse)
 def get_resume(
     resume_id: str,
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> ResumeDetailResponse:
-    doc = container.mongo_repository.get_resume(resume_id)
+    doc = container.mongo_repository.get_resume(resume_id, workspace_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Resume not found")
 
@@ -333,9 +359,11 @@ def get_resume(
 @router.delete("/{resume_id}", response_model=DeleteResponse)
 def delete_resume(
     resume_id: str,
+    _user: UserProfile = Depends(get_current_user),
+    workspace_id: str = Depends(get_current_workspace_id),
     container: AppContainer = Depends(get_container),
 ) -> DeleteResponse:
-    doc = container.mongo_repository.get_resume(resume_id)
+    doc = container.mongo_repository.get_resume(resume_id, workspace_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Resume not found")
 
@@ -346,7 +374,7 @@ def delete_resume(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Failed to delete file from storage: {exc}") from exc
 
-    deleted = container.mongo_repository.soft_delete_resume(resume_id)
+    deleted = container.mongo_repository.soft_delete_resume(resume_id, workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Resume not found")
     return DeleteResponse(success=True, message="Resume deleted successfully")

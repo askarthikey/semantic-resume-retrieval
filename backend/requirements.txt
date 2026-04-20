@@ -11,3 +11,4 @@ numpy
 pytest
 httpx
 supabase
+PyJWT

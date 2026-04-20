@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     supabase_bucket: str = "resumes"
     supabase_path_prefix: str = "resumes"
     supabase_signed_url_ttl_seconds: int = 3600
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_seconds: int = 3600
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -11,6 +11,7 @@ class MongoResumeRepository:
 
     def create_resume(
         self,
+        workspace_id: str,
         filename: str,
         candidate_name: str,
         raw_text: str,
@@ -20,6 +21,7 @@ class MongoResumeRepository:
         storage_size_bytes: int | None = None,
     ) -> str:
         payload = {
+            "workspace_id": workspace_id,
             "filename": filename,
             "candidate_name": candidate_name,
             "raw_text": raw_text,
@@ -33,13 +35,13 @@ class MongoResumeRepository:
         inserted = self.collection.insert_one(payload)
         return str(inserted.inserted_id)
 
-    def get_resume(self, mongo_id: str) -> dict[str, Any] | None:
+    def get_resume(self, mongo_id: str, workspace_id: str) -> dict[str, Any] | None:
         if not ObjectId.is_valid(mongo_id):
             return None
-        return self.collection.find_one({"_id": ObjectId(mongo_id), "is_deleted": False})
+        return self.collection.find_one({"_id": ObjectId(mongo_id), "workspace_id": workspace_id, "is_deleted": False})
 
-    def list_resumes(self, page: int, page_size: int) -> tuple[list[dict[str, Any]], int]:
-        query = {"is_deleted": False}
+    def list_resumes(self, page: int, page_size: int, workspace_id: str) -> tuple[list[dict[str, Any]], int]:
+        query = {"is_deleted": False, "workspace_id": workspace_id}
         skip = (page - 1) * page_size
         docs = list(
             self.collection.find(query, {"raw_text": 0})
@@ -50,20 +52,20 @@ class MongoResumeRepository:
         total = self.collection.count_documents(query)
         return docs, total
 
-    def soft_delete_resume(self, mongo_id: str) -> bool:
+    def soft_delete_resume(self, mongo_id: str, workspace_id: str) -> bool:
         if not ObjectId.is_valid(mongo_id):
             return False
         result = self.collection.update_one(
-            {"_id": ObjectId(mongo_id), "is_deleted": False},
+            {"_id": ObjectId(mongo_id), "workspace_id": workspace_id, "is_deleted": False},
             {"$set": {"is_deleted": True}},
         )
         return result.modified_count == 1
 
-    def get_resumes_by_ids(self, mongo_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def get_resumes_by_ids(self, mongo_ids: list[str], workspace_id: str) -> dict[str, dict[str, Any]]:
         object_ids = [ObjectId(item) for item in mongo_ids if ObjectId.is_valid(item)]
         if not object_ids:
             return {}
-        cursor = self.collection.find({"_id": {"$in": object_ids}, "is_deleted": False})
+        cursor = self.collection.find({"_id": {"$in": object_ids}, "workspace_id": workspace_id, "is_deleted": False})
         docs = list(cursor)
         return {str(doc["_id"]): doc for doc in docs}
 
@@ -72,7 +74,7 @@ class MongoUploadJobRepository:
     def __init__(self, collection: Collection):
         self.collection = collection
 
-    def create_job(self, files: list[dict[str, Any]]) -> str:
+    def create_job(self, files: list[dict[str, Any]], workspace_id: str) -> str:
         now = datetime.now(timezone.utc)
         total_files = len(files)
         success_count = sum(1 for file_info in files if file_info.get("status") == "success")
@@ -92,6 +94,7 @@ class MongoUploadJobRepository:
             completed_at = now
 
         payload = {
+            "workspace_id": workspace_id,
             "status": status,
             "total_files": total_files,
             "processed_files": processed_files,
@@ -105,16 +108,16 @@ class MongoUploadJobRepository:
         inserted = self.collection.insert_one(payload)
         return str(inserted.inserted_id)
 
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
+    def get_job(self, job_id: str, workspace_id: str) -> dict[str, Any] | None:
         if not ObjectId.is_valid(job_id):
             return None
-        return self.collection.find_one({"_id": ObjectId(job_id)})
+        return self.collection.find_one({"_id": ObjectId(job_id), "workspace_id": workspace_id})
 
-    def mark_started(self, job_id: str) -> None:
+    def mark_started(self, job_id: str, workspace_id: str) -> None:
         if not ObjectId.is_valid(job_id):
             return
         self.collection.update_one(
-            {"_id": ObjectId(job_id)},
+            {"_id": ObjectId(job_id), "workspace_id": workspace_id},
             {
                 "$set": {
                     "status": "processing",
@@ -123,11 +126,11 @@ class MongoUploadJobRepository:
             },
         )
 
-    def mark_file_processing(self, job_id: str, file_id: str) -> None:
+    def mark_file_processing(self, job_id: str, file_id: str, workspace_id: str) -> None:
         if not ObjectId.is_valid(job_id):
             return
         self.collection.update_one(
-            {"_id": ObjectId(job_id), "files.file_id": file_id},
+            {"_id": ObjectId(job_id), "workspace_id": workspace_id, "files.file_id": file_id},
             {
                 "$set": {
                     "files.$.status": "processing",
@@ -136,11 +139,18 @@ class MongoUploadJobRepository:
             },
         )
 
-    def mark_file_success(self, job_id: str, file_id: str, mongo_id: str, candidate_name: str) -> None:
+    def mark_file_success(
+        self,
+        job_id: str,
+        file_id: str,
+        mongo_id: str,
+        candidate_name: str,
+        workspace_id: str,
+    ) -> None:
         if not ObjectId.is_valid(job_id):
             return
         self.collection.update_one(
-            {"_id": ObjectId(job_id), "files.file_id": file_id},
+            {"_id": ObjectId(job_id), "workspace_id": workspace_id, "files.file_id": file_id},
             {
                 "$set": {
                     "files.$.status": "success",
@@ -155,11 +165,11 @@ class MongoUploadJobRepository:
             },
         )
 
-    def mark_file_error(self, job_id: str, file_id: str, error: str) -> None:
+    def mark_file_error(self, job_id: str, file_id: str, error: str, workspace_id: str) -> None:
         if not ObjectId.is_valid(job_id):
             return
         self.collection.update_one(
-            {"_id": ObjectId(job_id), "files.file_id": file_id},
+            {"_id": ObjectId(job_id), "workspace_id": workspace_id, "files.file_id": file_id},
             {
                 "$set": {
                     "files.$.status": "error",
@@ -172,8 +182,8 @@ class MongoUploadJobRepository:
             },
         )
 
-    def finalize_job(self, job_id: str) -> None:
-        job = self.get_job(job_id)
+    def finalize_job(self, job_id: str, workspace_id: str) -> None:
+        job = self.get_job(job_id, workspace_id)
         if not job or not ObjectId.is_valid(job_id):
             return
 
@@ -187,7 +197,7 @@ class MongoUploadJobRepository:
             status = "partially_completed"
 
         self.collection.update_one(
-            {"_id": ObjectId(job_id)},
+            {"_id": ObjectId(job_id), "workspace_id": workspace_id},
             {
                 "$set": {
                     "status": status,
