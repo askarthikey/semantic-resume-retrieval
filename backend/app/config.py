@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     faiss_idmap_path: str = "./faiss_store/id_map.json"
     embedding_model: str = "all-MiniLM-L6-v2"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_bucket: str = "resumes"
+    supabase_path_prefix: str = "resumes"
+    supabase_signed_url_ttl_seconds: int = 3600
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

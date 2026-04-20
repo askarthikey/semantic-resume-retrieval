@@ -66,6 +66,7 @@ export function ResumesPage() {
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Candidate</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">File</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Stored File</th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
             </tr>
           </thead>
@@ -75,6 +76,20 @@ export function ResumesPage() {
                 <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.candidate_name}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{item.filename}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{new Date(item.upload_timestamp).toLocaleString()}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {item.file_storage?.download_url ? (
+                    <a
+                      href={item.file_storage.download_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2 transition hover:text-sky-800"
+                    >
+                      View/Download
+                    </a>
+                  ) : (
+                    <span className="text-slate-400">Unavailable</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => handleDelete(item.mongo_id)}
@@ -87,7 +102,7 @@ export function ResumesPage() {
             ))}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-500">
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-500">
                   No resumes available yet.
                 </td>
               </tr>

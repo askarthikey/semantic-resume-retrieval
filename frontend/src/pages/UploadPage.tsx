@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getApiErrorMessage } from "../api/client";
-import { uploadResumes } from "../api/resumes";
+import { createUploadJob, getUploadJobStatus } from "../api/resumes";
+import type { UploadJobStatusResponse } from "../api/types";
 import { Toast } from "../components/Toast";
 
 type ToastState = {
@@ -19,9 +20,52 @@ type UploadItemState = {
 export function UploadPage() {
   const [items, setItems] = useState<UploadItemState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const isMountedRef = useRef(true);
 
   const acceptedTypes = useMemo(() => [".pdf", ".txt"], []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function applyJobStatus(response: UploadJobStatusResponse) {
+    const buckets = new Map<string, UploadJobStatusResponse["files"]>();
+    for (const entry of response.files) {
+      const existing = buckets.get(entry.filename) ?? [];
+      existing.push(entry);
+      buckets.set(entry.filename, existing);
+    }
+
+    setItems((prev) =>
+      prev.map((item) => {
+        const queue = buckets.get(item.file.name) ?? [];
+        const entry = queue.shift();
+        buckets.set(item.file.name, queue);
+        if (!entry) {
+          return item;
+        }
+
+        if (entry.status === "success") {
+          return { ...item, status: "success", progress: 100, error: undefined };
+        }
+        if (entry.status === "error") {
+          return { ...item, status: "error", progress: 100, error: entry.error ?? "Processing failed" };
+        }
+        if (entry.status === "processing") {
+          return { ...item, status: "uploading", progress: Math.max(item.progress, 70) };
+        }
+        return { ...item, status: "uploading", progress: Math.max(item.progress, 30) };
+      }),
+    );
+  }
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -36,37 +80,44 @@ export function UploadPage() {
   async function handleUpload() {
     if (items.length === 0) return;
     setIsUploading(true);
-
-    setItems((prev) => prev.map((item) => ({ ...item, status: "uploading", progress: 35 })));
+    setItems((prev) => prev.map((item) => ({ ...item, status: "uploading", progress: 20, error: undefined })));
 
     try {
-      const response = await uploadResumes(items.map((item) => item.file));
+      const accepted = await createUploadJob(items.map((item) => item.file));
+      setActiveJobId(accepted.job_id);
+      setToast({ kind: "success", message: accepted.message });
 
-      const failedByName = new Map(response.failed.map((f) => [f.filename, f.error]));
-      setItems((prev) =>
-        prev.map((item) => {
-          const failure = failedByName.get(item.file.name);
-          if (failure) {
-            return { ...item, status: "error", progress: 100, error: failure };
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        const status = await getUploadJobStatus(accepted.job_id);
+        applyJobStatus(status);
+
+        const isTerminal =
+          status.status === "completed" ||
+          status.status === "failed" ||
+          status.status === "partially_completed";
+        if (isTerminal) {
+          if (status.failure_count > 0) {
+            setToast({
+              kind: "error",
+              message: `${status.success_count} file(s) processed, ${status.failure_count} file(s) failed.`,
+            });
+          } else {
+            setToast({ kind: "success", message: `All ${status.success_count} file(s) processed successfully.` });
           }
-          return { ...item, status: "success", progress: 100 };
-        }),
-      );
+          break;
+        }
 
-      if (response.uploaded.length > 0) {
-        const latest = response.uploaded[response.uploaded.length - 1];
-        setToast({
-          kind: "success",
-          message: `Uploaded ${response.uploaded.length} resume(s). Last detected: ${latest.candidate_name}`,
-        });
-      }
-      if (response.failed.length > 0) {
-        setToast({ kind: "error", message: `${response.failed.length} file(s) failed to upload.` });
+        await delay(1200);
       }
     } catch (error) {
       setToast({ kind: "error", message: getApiErrorMessage(error) });
       setItems((prev) => prev.map((item) => ({ ...item, status: "error", progress: 100, error: "Upload failed" })));
     } finally {
+      setActiveJobId(null);
       setIsUploading(false);
     }
   }
@@ -112,6 +163,7 @@ export function UploadPage() {
         >
           Clear
         </button>
+        {activeJobId && <span className="text-sm text-slate-600">Job: {activeJobId}</span>}
       </div>
 
       <div className="space-y-3">

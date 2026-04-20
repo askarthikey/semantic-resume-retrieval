@@ -22,7 +22,8 @@ Build a full-stack application that enables recruiters to upload resumes and sea
 ## What the System Does
 
 1. A recruiter uploads one or more resumes (PDF or plain text).
-2. The backend extracts raw text from each resume, generates a semantic embedding vector, stores the resume metadata in MongoDB, and indexes the embedding in FAISS.
+2. The backend stores uploaded files in Supabase Storage and immediately returns an upload job ID.
+3. Background processing extracts raw text from each resume, generates a semantic embedding vector, stores the resume metadata in MongoDB, and indexes the embedding in FAISS.
 3. When the recruiter types a natural language search query (e.g., "machine learning engineer with neural networks experience"), the backend embeds the query using the same model and performs a similarity search in FAISS to find the top-N most relevant resumes.
 4. The frontend displays ranked results with candidate name, similarity score, and resume highlights.
 
@@ -39,17 +40,20 @@ Build a full-stack application that enables recruiters to upload resumes and sea
 ### Resume Ingestion (`POST /resumes/upload`)
 
 - Accept multipart file upload (PDF or `.txt`).
-- Extract full text from the file. For PDFs, use `pdfminer.six` or `PyMuPDF`. For plain text files, read directly.
+- Upload file bytes to Supabase Storage first and return `202 Accepted` quickly with `job_id`.
+- Run parsing and indexing in a background worker for each accepted file.
+- Extract full text from the stored object. For PDFs, use `pdfminer.six` or `PyMuPDF`. For plain text files, read directly.
 - Clean the extracted text: remove excessive whitespace, fix encoding issues, strip irrelevant characters.
 - Generate a 384-dim embedding vector from the cleaned text.
-- Save the following to MongoDB:
+- Save the following to MongoDB when background processing succeeds:
   - `_id` (ObjectId)
   - `filename` (original file name)
   - `candidate_name` (attempt to extract from the top of the resume text; fall back to the filename)
   - `raw_text` (full cleaned text)
   - `upload_timestamp`
 - After saving to MongoDB, get the new document's `_id`, convert it to a string, and add the embedding to the FAISS index using the integer position as the FAISS ID. Maintain a separate in-memory (and persisted) mapping of `faiss_id → mongo_id` so you can look up the MongoDB document from a FAISS search result.
-- Persist the FAISS index to disk after every upload so it survives restarts.
+- Persist the FAISS index to disk after each processed file so it survives restarts.
+- Expose a polling endpoint `GET /resumes/upload-jobs/{job_id}` that returns aggregate progress and per-file states (`pending`, `processing`, `success`, `error`).
 
 ### FAISS Index Management
 
@@ -111,9 +115,10 @@ The app has two primary views accessible from a top navigation bar:
 
 **1. Upload Page**
 - A drag-and-drop file upload zone that accepts `.pdf` and `.txt` files. Allow selecting multiple files at once.
-- On upload, show a progress indicator per file.
-- After successful upload, show a success toast with the detected candidate name and filename.
-- On failure, show an error message.
+- On upload, send files once, receive a `job_id`, and poll job status endpoint every 1–2 seconds.
+- Show a progress indicator and status per file based on job polling response.
+- Show success when background processing completes successfully.
+- On per-file failure, show error details while allowing other files in the same job to succeed.
 
 **2. Search Page**
 - A large, prominent search input field where the recruiter types a natural language query (e.g., "frontend developer with React and TypeScript experience").
@@ -170,7 +175,7 @@ EMBEDDING_MODEL=all-MiniLM-L6-v2
 ## Non-Functional Expectations
 
 - The embedding model is loaded **once** at startup — not on every request. This is critical for performance.
-- Resume upload should respond within a few seconds for typical resumes (1–3 pages).
+- Resume upload acceptance should respond quickly because heavy processing runs in background.
 - Search should respond within 1 second for up to a few thousand indexed resumes.
 - The system should handle at least 1000 resumes without performance degradation, given FAISS's efficiency with flat indexes at that scale.
 
@@ -180,7 +185,8 @@ EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/resumes/upload` | Upload one or more resume files |
+| POST | `/resumes/upload` | Upload one or more resume files and create async ingestion job |
+| GET | `/resumes/upload-jobs/{job_id}` | Get upload job progress and per-file outcomes |
 | POST | `/resumes/search` | Semantic search with a natural language query |
 | GET | `/resumes` | List all resumes (paginated) |
 | GET | `/resumes/{id}` | Get a single resume by ID |
@@ -190,7 +196,8 @@ EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 ## Done Means
 
-- A recruiter can upload 10 resumes in various formats and immediately search across them using natural language.
+- A recruiter can upload 10 resumes in various formats without request timeout failures and track processing completion by job status.
+- Once files are processed successfully in background, they become searchable using natural language queries.
 - Results are ranked by semantic relevance, not keyword frequency.
 - The system survives a server restart without losing any indexed resumes.
 - The UI is clean, responsive, and provides clear feedback on all actions.

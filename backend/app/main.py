@@ -7,7 +7,9 @@ from pymongo import MongoClient
 
 from app.config import get_settings
 from app.repositories.faiss_repository import FaissRepository
+from app.repositories.mongo_repository import MongoUploadJobRepository
 from app.repositories.mongo_repository import MongoResumeRepository
+from app.repositories.supabase_storage_repository import SupabaseStorageRepository
 from app.routers.resumes import router as resumes_router
 from app.services.embedding_service import EmbeddingService
 from app.state.container import AppContainer
@@ -19,14 +21,23 @@ async def lifespan(fastapi_app: FastAPI):
     mongo_client = MongoClient(settings.mongo_uri)
     database = mongo_client[settings.mongo_db_name]
     collection = database["resumes"]
+    upload_jobs_collection = database["upload_jobs"]
 
     container = AppContainer(
         mongo_client=mongo_client,
         mongo_repository=MongoResumeRepository(collection),
+        upload_job_repository=MongoUploadJobRepository(upload_jobs_collection),
         faiss_repository=FaissRepository(
             index_path=settings.faiss_index_path,
             idmap_path=settings.faiss_idmap_path,
             dimension=384,
+        ),
+        storage_repository=SupabaseStorageRepository(
+            url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            bucket=settings.supabase_bucket,
+            path_prefix=settings.supabase_path_prefix,
+            signed_url_ttl_seconds=settings.supabase_signed_url_ttl_seconds,
         ),
         embedding_service=EmbeddingService(settings.embedding_model),
         write_lock=asyncio.Lock(),

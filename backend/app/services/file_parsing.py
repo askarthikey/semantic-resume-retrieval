@@ -4,10 +4,8 @@ import fitz
 from fastapi import UploadFile
 
 
-async def extract_text_from_upload(file: UploadFile) -> str:
-    filename = file.filename or ""
-    extension = os.path.splitext(filename.lower())[1]
-    file_bytes = await file.read()
+def extract_text_from_bytes(filename: str, file_bytes: bytes) -> str:
+    extension = os.path.splitext((filename or "").lower())[1]
 
     if extension == ".txt":
         return file_bytes.decode("utf-8", errors="ignore")
@@ -20,3 +18,9 @@ async def extract_text_from_upload(file: UploadFile) -> str:
             document.close()
 
     raise ValueError("Unsupported file format")
+
+
+async def extract_text_from_upload(file: UploadFile) -> str:
+    filename = file.filename or ""
+    file_bytes = await file.read()
+    return extract_text_from_bytes(filename, file_bytes)

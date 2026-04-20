@@ -3,7 +3,7 @@
 ## Overall status
 
 The project is implemented as a working full-stack system:
-- Backend APIs are available for upload, search, listing, detail retrieval, delete, and health.
+- Backend APIs are available for async upload jobs, search, listing, detail retrieval, delete, and health.
 - Frontend pages are connected to backend APIs for core recruiter workflows.
 - FAISS and ID mapping persistence are in place.
 
@@ -24,28 +24,30 @@ The project is implemented as a working full-stack system:
 1. `POST /resumes/upload`
    - Accepts multiple uploaded files.
    - Validates extension (`.pdf`, `.txt`).
-   - Extracts text (`PyMuPDF` for PDFs, direct decode for text files).
-   - Cleans text and rejects files with no extractable content.
-   - Extracts candidate name heuristic from top lines (fallback to filename stem).
-   - Embeds text, inserts Mongo record, inserts FAISS vector, persists index/map.
-   - Returns per-file success/failure details.
+  - Uploads original file bytes to Supabase Storage first.
+  - Creates an async upload job record in MongoDB and returns `202 Accepted` quickly.
+  - Schedules background processing for parsing, embedding, Mongo write, and FAISS indexing.
 
-2. `POST /resumes/search`
+2. `GET /resumes/upload-jobs/{job_id}`
+  - Returns async job progress with per-file statuses (`pending`, `processing`, `success`, `error`).
+  - Includes aggregate counts (`processed_files`, `success_count`, `failure_count`) and timestamps.
+
+3. `POST /resumes/search`
    - Validates non-empty query.
    - Handles empty-index state gracefully.
    - Embeds query, performs FAISS search.
    - Maps FAISS IDs to Mongo IDs, fetches docs from Mongo, skips deleted/missing docs.
    - Returns ranked result list with snippet and normalized `0..1` similarity score.
 
-3. `GET /resumes`
+4. `GET /resumes`
    - Pagination (`page`, `page_size`) with validation.
    - Returns metadata-only list (no raw text) and paging metadata.
 
-4. `GET /resumes/{id}`
+5. `GET /resumes/{id}`
    - Returns full resume detail including raw text.
    - 404 when not found/invalid.
 
-5. `DELETE /resumes/{id}`
+6. `DELETE /resumes/{id}`
    - Soft delete in MongoDB (`is_deleted=true`).
    - 404 when not found/invalid.
 
@@ -109,6 +111,7 @@ The project is implemented as a working full-stack system:
 1. Delete uses soft-delete only; FAISS vectors are not physically removed.
 2. Upload progress in UI is simulated status progression (not true stream byte progress).
 3. Candidate name extraction is heuristic and may fall back to filename for some resume formats.
+4. Background processing currently runs in-process (FastAPI BackgroundTasks), so in-flight jobs do not survive a backend restart.
 
 ## Verification summary
 

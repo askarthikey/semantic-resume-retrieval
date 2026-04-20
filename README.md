@@ -2,7 +2,7 @@
 
 A full-stack recruiter tool for semantic resume ingestion and retrieval.
 
-The backend extracts text from resumes, embeds content with `all-MiniLM-L6-v2`, stores metadata in MongoDB, indexes vectors in FAISS, and exposes search/list/detail/delete APIs. The frontend provides Upload, Search, and Resumes pages connected to those APIs.
+The backend uploads original files to Supabase Storage first, then processes parsing/embedding/indexing asynchronously in the background, stores metadata in MongoDB, indexes vectors in FAISS, and exposes search/list/detail/delete APIs. The frontend provides Upload, Search, and Resumes pages connected to those APIs.
 
 ## Tech stack
 
@@ -11,6 +11,7 @@ The backend extracts text from resumes, embeds content with `all-MiniLM-L6-v2`, 
 | Frontend | React 19, Vite, TypeScript, Tailwind |
 | Backend | FastAPI, PyMuPDF, sentence-transformers, FAISS |
 | Database | MongoDB |
+| Object Storage | Supabase Storage (private bucket + signed URLs) |
 
 ## Repository structure
 
@@ -27,10 +28,12 @@ The backend extracts text from resumes, embeds content with `all-MiniLM-L6-v2`, 
 ## End-to-end architecture
 
 1. Resume files (`.pdf`, `.txt`) are uploaded to `POST /resumes/upload`.
-2. Backend extracts text, normalizes/cleans text, generates an embedding, writes metadata to MongoDB, then stores vector in FAISS.
-3. Query text is sent to `POST /resumes/search`.
-4. Query embedding is searched in FAISS, then matched to MongoDB docs via persisted ID mapping.
-5. Frontend renders ranked results, detail modal, and inventory controls.
+2. Backend stores uploaded files in Supabase Storage and immediately returns `202 Accepted` with a `job_id`.
+3. Background processing parses text, cleans text, generates embeddings, writes Mongo metadata, and adds vectors to FAISS.
+4. Frontend polls `GET /resumes/upload-jobs/{job_id}` to track per-file status.
+5. Query text is sent to `POST /resumes/search`.
+6. Query embedding is searched in FAISS, then matched to MongoDB docs via persisted ID mapping.
+7. Frontend renders ranked results, detail modal, and inventory controls.
 
 ## Backend setup (Windows PowerShell)
 
@@ -52,6 +55,11 @@ Copy-Item .env.example .env
 | `FAISS_IDMAP_PATH` | `./faiss_store/id_map.json` | Persisted FAISS ID mapping file |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformer model name |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed frontend origins |
+| `SUPABASE_URL` | _empty_ | Supabase project URL (e.g. `https://<project-ref>.supabase.co`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | _empty_ | Service-role key used by backend to upload/delete storage objects |
+| `SUPABASE_BUCKET` | `resumes` | Target storage bucket name |
+| `SUPABASE_PATH_PREFIX` | `resumes` | Prefix folder used for stored resume object keys |
+| `SUPABASE_SIGNED_URL_TTL_SECONDS` | `3600` | Signed URL expiration in seconds |
 
 ## Frontend setup (Windows PowerShell)
 
@@ -75,9 +83,20 @@ npm run dev
 ### `POST /resumes/upload`
 - Multipart field: `files` (one or more `.pdf` / `.txt`)
 - Response:
-  - `success: boolean`
-  - `uploaded: [{ mongo_id, filename, candidate_name, upload_timestamp }]`
-  - `failed: [{ filename, error }]`
+  - `job_id: string`
+  - `status: queued | completed | failed | partially_completed`
+  - `total_files: number`
+  - `message: string`
+
+### `GET /resumes/upload-jobs/{job_id}`
+- Returns the asynchronous ingestion job state:
+  - `status`
+  - `total_files`
+  - `processed_files`
+  - `success_count`
+  - `failure_count`
+  - `files: [{ file_id, filename, status, error?, mongo_id?, candidate_name? }]`
+  - `created_at`, `started_at`, `completed_at`
 
 ### `POST /resumes/search`
 - Body:
@@ -142,4 +161,6 @@ On startup, backend reloads these files; if index and map are inconsistent, it r
 - Embeddings are L2-normalized for both ingestion and search.
 - Similarity scores are returned as normalized `0..1` values.
 - Empty/unsupported files are rejected per-file during upload.
+- Upload now runs in two phases: cloud upload acceptance first, then background parsing/indexing.
+- A resume becomes searchable only after its background processing step reaches `success`.
 - Deletion is soft-delete by design (FAISS vectors remain, but deleted docs are filtered out from responses).
