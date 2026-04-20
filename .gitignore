@@ -1,0 +1,6 @@
+backend/.venv/
+backend/.env
+backend/faiss_store/index.bin
+backend/faiss_store/id_map.json
+frontend/node_modules/
+frontend/dist/
