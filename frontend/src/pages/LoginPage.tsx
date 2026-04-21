@@ -10,12 +10,11 @@ type Mode = "login" | "register";
 
 export function LoginPage() {
   const { isAuthenticated, loginWithPassword, registerWithPassword } = useAuth();
-
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{ kind: "success" | "error" | "info"; message: string } | null>(null);
 
   if (isAuthenticated) {
     return <Navigate to="/upload" replace />;
@@ -30,7 +29,6 @@ export function LoginPage() {
       } else {
         await registerWithPassword(email, password);
       }
-      setToast({ kind: "success", message: mode === "login" ? "Welcome back." : "Account created." });
     } catch (error) {
       setToast({ kind: "error", message: getApiErrorMessage(error) });
     } finally {
@@ -38,52 +36,160 @@ export function LoginPage() {
     }
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--bg-overlay)",
+    border: "1px solid var(--border-default)",
+    borderRadius: 8,
+    color: "var(--text-primary)",
+    padding: "10px 14px",
+    fontSize: 14,
+    outline: "none",
+    transition: "border-color 0.15s",
+  };
+
   return (
-    <div className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_20%_15%,#dbeafe_0%,transparent_35%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)] p-4">
-      <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-lg">
-        <p className="text-xs uppercase tracking-[0.18em] text-sky-600">Recruiter Studio</p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">{mode === "login" ? "Sign in" : "Create account"}</h1>
-        <p className="mt-2 text-sm text-slate-600">Secure access for workspace-isolated resume operations.</p>
-
-        <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-          <label className="block space-y-1 text-sm">
-            <span className="font-semibold text-slate-700">Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-slate-900 outline-none ring-sky-500 transition focus:ring"
-            />
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span className="font-semibold text-slate-700">Password</span>
-            <input
-              required
-              minLength={8}
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-slate-900 outline-none ring-sky-500 transition focus:ring"
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+    <div
+      style={{
+        display: "grid",
+        placeItems: "center",
+        minHeight: "100vh",
+        background: "var(--bg-base)",
+        padding: 16,
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        {/* Brand mark */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: "var(--brand)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 14,
+            }}
           >
-            {busy ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
-          </button>
-        </form>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-inverse)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </div>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+            Resume Studio
+          </h1>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--text-muted)" }}>
+            Semantic candidate retrieval
+          </p>
+        </div>
 
-        <button
-          onClick={() => setMode((prev) => (prev === "login" ? "register" : "login"))}
-          className="mt-4 text-sm font-semibold text-sky-700 hover:text-sky-800"
+        {/* Card */}
+        <div
+          style={{
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 14,
+            padding: "28px 28px",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.4)",
+          }}
         >
-          {mode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}
-        </button>
-      </section>
+          {/* Mode tabs */}
+          <div
+            style={{
+              display: "flex",
+              gap: 0,
+              background: "var(--bg-overlay)",
+              borderRadius: 8,
+              padding: 3,
+              marginBottom: 24,
+            }}
+          >
+            {(["login", "register"] as Mode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                style={{
+                  flex: 1,
+                  padding: "7px 0",
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "background 0.15s, color 0.15s",
+                  background: mode === m ? "var(--bg-surface)" : "transparent",
+                  color: mode === m ? "var(--text-primary)" : "var(--text-muted)",
+                  boxShadow: mode === m ? "0 1px 4px rgba(0,0,0,0.3)" : "none",
+                }}
+              >
+                {m === "login" ? "Sign in" : "Register"}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                Email
+              </label>
+              <input
+                required
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                style={inputStyle}
+                onFocus={(e) => ((e.target as HTMLInputElement).style.borderColor = "var(--brand)")}
+                onBlur={(e) => ((e.target as HTMLInputElement).style.borderColor = "var(--border-default)")}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                Password
+              </label>
+              <input
+                required
+                minLength={8}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Min. 8 characters"
+                style={inputStyle}
+                onFocus={(e) => ((e.target as HTMLInputElement).style.borderColor = "var(--brand)")}
+                onBlur={(e) => ((e.target as HTMLInputElement).style.borderColor = "var(--border-default)")}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={busy}
+              style={{
+                marginTop: 4,
+                width: "100%",
+                padding: "11px 0",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 700,
+                border: "none",
+                cursor: busy ? "not-allowed" : "pointer",
+                background: busy ? "var(--bg-subtle)" : "var(--brand)",
+                color: busy ? "var(--text-muted)" : "var(--text-inverse)",
+                transition: "background 0.15s",
+                letterSpacing: "-0.01em",
+              }}
+            >
+              {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+        </div>
+
+        <p style={{ textAlign: "center", marginTop: 20, fontSize: 12, color: "var(--text-muted)" }}>
+          Secure, workspace-isolated resume operations.
+        </p>
+      </div>
 
       {toast && <Toast message={toast.message} kind={toast.kind} onClose={() => setToast(null)} />}
     </div>

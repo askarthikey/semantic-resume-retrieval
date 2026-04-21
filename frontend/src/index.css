@@ -1,21 +1,107 @@
 @import "tailwindcss";
 
+/* ── Supabase-inspired dark design tokens ─────────────────────────── */
 :root {
-  font-family: "Outfit Variable", "Segoe UI", sans-serif;
+  /* Backgrounds */
+  --bg-base:       #0f0f0f;
+  --bg-surface:    #1c1c1c;
+  --bg-overlay:    #262626;
+  --bg-muted:      #2a2a2a;
+  --bg-subtle:     #303030;
+
+  /* Borders */
+  --border-default: rgba(255,255,255,0.08);
+  --border-strong:  rgba(255,255,255,0.15);
+  --border-brand:   rgba(62,207,142,0.35);
+
+  /* Text */
+  --text-primary:   #ededed;
+  --text-secondary: #a1a1a1;
+  --text-muted:     #666666;
+  --text-inverse:   #0f0f0f;
+
+  /* Brand (Supabase green) */
+  --brand:          #3ecf8e;
+  --brand-dark:     #2dbb7a;
+  --brand-muted:    rgba(62,207,142,0.12);
+  --brand-ring:     rgba(62,207,142,0.30);
+
+  /* Status */
+  --success-bg:   rgba(62,207,142,0.10);
+  --success-text: #3ecf8e;
+  --success-border: rgba(62,207,142,0.30);
+
+  --error-bg:   rgba(239,68,68,0.10);
+  --error-text: #f87171;
+  --error-border: rgba(239,68,68,0.30);
+
+  --warning-bg:   rgba(245,158,11,0.10);
+  --warning-text: #fbbf24;
+  --warning-border: rgba(245,158,11,0.30);
+
+  --info-bg:   rgba(99,102,241,0.10);
+  --info-text: #818cf8;
+  --info-border: rgba(99,102,241,0.30);
+
+  /* Sidebar */
+  --sidebar-w: 240px;
 }
 
-* {
+/* ── Base reset ───────────────────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Outfit", "Inter", "Segoe UI", system-ui, sans-serif;
   min-height: 100vh;
-  color: #0f172a;
 }
 
-button,
-input,
-select {
+button, input, select, textarea {
   font: inherit;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-subtle); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ── Progress bar animation ─────────────────────────────────────────── */
+@keyframes progress-stripe {
+  0%   { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-brand {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes shimmer-bar {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
 }

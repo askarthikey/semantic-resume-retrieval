@@ -22,7 +22,12 @@ const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefi
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(() => localStorage.getItem(WORKSPACE_KEY));
+  // BUG FIX: read from localStorage on init so UI can show the stored ID
+  // while workspaces are still loading — but do NOT remove it on logout
+  // so the selection is restored on the next login.
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    () => localStorage.getItem(WORKSPACE_KEY),
+  );
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -36,14 +41,20 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setWorkspaces(items);
 
       if (items.length === 0) {
-        localStorage.removeItem(WORKSPACE_KEY);
+        // Only clear in-memory selection; keep localStorage so if a workspace
+        // is created later the ID could be compared.
         setSelectedWorkspaceId(null);
         setWorkspaceId(null);
         return;
       }
 
+      // Restore the previously-used workspace if it still exists, otherwise
+      // fall back to the first workspace in the list.
       const stored = localStorage.getItem(WORKSPACE_KEY);
-      const validSelection = stored && items.some((item) => item.workspace_id === stored) ? stored : items[0].workspace_id;
+      const validSelection =
+        stored && items.some((item) => item.workspace_id === stored)
+          ? stored
+          : items[0].workspace_id;
       localStorage.setItem(WORKSPACE_KEY, validSelection);
       setSelectedWorkspaceId(validSelection);
       setWorkspaceId(validSelection);
@@ -54,10 +65,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isAuthenticated) {
+      // BUG FIX: do NOT call localStorage.removeItem(WORKSPACE_KEY) here.
+      // Keeping the key means the workspace is restored on the next login.
       setWorkspaces([]);
       setSelectedWorkspaceId(null);
       setWorkspaceId(null);
-      localStorage.removeItem(WORKSPACE_KEY);
       return;
     }
     void refresh();
