@@ -71,6 +71,7 @@ class SearchResultItem(BaseModel):
     filename: str
     similarity_score: float
     snippet: str
+    per_model_scores: dict[str, float] | None = None
 
 
 class SearchResponse(BaseModel):

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 
 from app.config import get_settings
-from app.repositories.faiss_repository import FaissRepository
+from app.repositories.faiss_repository import EnsembleFaissRepository
 from app.repositories.identity_repository import MongoIdentityRepository
 from app.repositories.mongo_repository import MongoUploadJobRepository
 from app.repositories.mongo_repository import MongoResumeRepository
@@ -14,7 +14,7 @@ from app.repositories.supabase_storage_repository import SupabaseStorageReposito
 from app.routers.auth import router as auth_router
 from app.routers.resumes import router as resumes_router
 from app.routers.workspaces import router as workspaces_router
-from app.services.embedding_service import EmbeddingService
+from app.services.embedding_service import EnsembleEmbeddingService
 from app.state.container import AppContainer
 
 
@@ -36,16 +36,27 @@ async def lifespan(fastapi_app: FastAPI):
     )
     identity_repository.ensure_indexes()
 
+    # ── Ensemble embedding service ────────────────────────────────────
+    model_names = settings.ensemble_models_list
+    embedding_service = EnsembleEmbeddingService(model_names)
+
+    model_dimensions: dict[str, int] = {
+        info.slug: info.dimension for info in embedding_service.get_models()
+    }
+
+    faiss_store_dir = str(settings.faiss_index_path).rsplit("/", 1)[0]  # e.g. ./faiss_store
+
+    faiss_repository = EnsembleFaissRepository(
+        store_dir=faiss_store_dir,
+        model_dimensions=model_dimensions,
+    )
+
     container = AppContainer(
         mongo_client=mongo_client,
         mongo_repository=MongoResumeRepository(collection),
         upload_job_repository=MongoUploadJobRepository(upload_jobs_collection),
         identity_repository=identity_repository,
-        faiss_repository=FaissRepository(
-            index_path=settings.faiss_index_path,
-            idmap_path=settings.faiss_idmap_path,
-            dimension=384,
-        ),
+        faiss_repository=faiss_repository,
         storage_repository=SupabaseStorageRepository(
             url=settings.supabase_url,
             service_role_key=settings.supabase_service_role_key,
@@ -53,8 +64,9 @@ async def lifespan(fastapi_app: FastAPI):
             path_prefix=settings.supabase_path_prefix,
             signed_url_ttl_seconds=settings.supabase_signed_url_ttl_seconds,
         ),
-        embedding_service=EmbeddingService(settings.embedding_model),
+        embedding_service=embedding_service,
         write_lock=asyncio.Lock(),
+        ensemble_fusion_k=settings.ensemble_fusion_k,
     )
 
     fastapi_app.state.container = container

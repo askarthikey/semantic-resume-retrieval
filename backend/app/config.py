@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     faiss_index_path: str = "./faiss_store/index.bin"
     faiss_idmap_path: str = "./faiss_store/id_map.json"
     embedding_model: str = "all-MiniLM-L6-v2"
+    ensemble_models: str = "all-MiniLM-L6-v2,all-mpnet-base-v2,multi-qa-MiniLM-L6-cos-v1"
+    ensemble_fusion_k: int = 60
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
@@ -24,6 +26,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def ensemble_models_list(self) -> list[str]:
+        return [m.strip() for m in self.ensemble_models.split(",") if m.strip()]
 
 
 @lru_cache(maxsize=1)

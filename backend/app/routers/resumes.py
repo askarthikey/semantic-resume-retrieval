@@ -23,6 +23,7 @@ from app.models.api import (
     UploadResponse,
 )
 from app.services.file_parsing import extract_text_from_bytes
+from app.services.score_fusion import reciprocal_rank_fusion
 from app.services.text_processing import allowed_extension, clean_text, extract_candidate_name
 from app.state.container import AppContainer
 
@@ -130,7 +131,9 @@ async def process_upload_job(container: AppContainer, job_id: str) -> None:
                 raise ValueError("No extractable text found in file")
 
             candidate_name = extract_candidate_name(cleaned_text, filename)
-            vector = container.embedding_service.embed_text(cleaned_text)
+
+            # ── Ensemble: embed with all models ───────────────────────
+            vectors = container.embedding_service.embed_text(cleaned_text)
 
             async with container.write_lock:
                 mongo_id = container.mongo_repository.create_resume(
@@ -143,7 +146,9 @@ async def process_upload_job(container: AppContainer, job_id: str) -> None:
                     storage_mime_type=file_info.get("storage_mime_type"),
                     storage_size_bytes=file_info.get("storage_size_bytes"),
                 )
-                container.faiss_repository.add(vector, mongo_id)
+                # Add vectors for every model into the ensemble FAISS repo
+                container.faiss_repository.add(vectors, mongo_id)
+
             repo.mark_file_success(job_id, file_id, mongo_id, candidate_name, workspace_id)
         except Exception as exc:
             if mongo_id:
@@ -259,32 +264,44 @@ def search_resumes(
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
-    if container.faiss_repository.index.ntotal == 0:
+    if container.faiss_repository.is_empty():
         return SearchResponse(query=query, results=[], total=0, message="No resumes indexed yet")
 
-    query_vec = container.embedding_service.embed_text(query)
-    distances, ids = container.faiss_repository.search(query_vec, payload.top_k)
+    # ── Ensemble search ───────────────────────────────────────────────
+    # 1. Embed query with every model
+    query_vectors = container.embedding_service.embed_text(query)
 
-    ranked_candidates: list[tuple[int, float, str]] = []
-    for score, faiss_id in zip(distances[0], ids[0]):
-        if faiss_id < 0:
-            continue
-        if faiss_id >= len(container.faiss_repository.id_map):
-            continue
-        mongo_id = container.faiss_repository.id_map[faiss_id]
-        ranked_candidates.append((int(faiss_id), float(score), mongo_id))
+    # 2. Search each per-model FAISS index
+    per_model_rankings = container.faiss_repository.search(query_vectors, payload.top_k)
 
-    docs_map = container.mongo_repository.get_resumes_by_ids([item[2] for item in ranked_candidates], workspace_id)
+    # 3. Fuse rankings via Reciprocal Rank Fusion
+    fused = reciprocal_rank_fusion(per_model_rankings, k=container.ensemble_fusion_k)
+
+    # 4. Trim to top_k
+    fused = fused[: payload.top_k]
+
+    # 5. Hydrate from MongoDB
+    mongo_ids = [mid for mid, _, _ in fused]
+    docs_map = container.mongo_repository.get_resumes_by_ids(mongo_ids, workspace_id)
+
+    # 6. Normalise RRF scores to 0..1 range for display
+    max_rrf = fused[0][1] if fused else 1.0
 
     results: list[SearchResultItem] = []
     rank = 1
-    for _, score, mongo_id in ranked_candidates:
+    for mongo_id, rrf_score, raw_scores in fused:
         doc = docs_map.get(mongo_id)
         if not doc:
             continue
 
         snippet = (doc.get("raw_text") or "")[:300]
-        similarity = max(0.0, min(1.0, (score + 1.0) / 2.0))
+        similarity = max(0.0, min(1.0, rrf_score / max_rrf)) if max_rrf > 0 else 0.0
+
+        # Convert raw cosine scores to 0..1 for per-model display
+        per_model_display = {
+            slug: max(0.0, min(1.0, (s + 1.0) / 2.0))
+            for slug, s in raw_scores.items()
+        }
 
         results.append(
             SearchResultItem(
@@ -294,6 +311,7 @@ def search_resumes(
                 filename=doc.get("filename", "Unknown"),
                 similarity_score=similarity,
                 snippet=snippet,
+                per_model_scores=per_model_display,
             )
         )
         rank += 1
