@@ -284,9 +284,7 @@ def search_resumes(
     mongo_ids = [mid for mid, _, _ in fused]
     docs_map = container.mongo_repository.get_resumes_by_ids(mongo_ids, workspace_id)
 
-    # 6. Normalise RRF scores to 0..1 range for display
-    max_rrf = fused[0][1] if fused else 1.0
-
+    # 6. Build results and compute absolute similarity scores
     results: list[SearchResultItem] = []
     rank = 1
     for mongo_id, rrf_score, raw_scores in fused:
@@ -295,13 +293,19 @@ def search_resumes(
             continue
 
         snippet = (doc.get("raw_text") or "")[:300]
-        similarity = max(0.0, min(1.0, rrf_score / max_rrf)) if max_rrf > 0 else 0.0
 
         # Convert raw cosine scores to 0..1 for per-model display
+        # Clamp negative similarities to 0 to accurately reflect unrelated documents
         per_model_display = {
-            slug: max(0.0, min(1.0, (s + 1.0) / 2.0))
+            slug: max(0.0, min(1.0, float(s)))
             for slug, s in raw_scores.items()
         }
+
+        # Overall similarity is the average absolute similarity across all models
+        if per_model_display:
+            similarity = sum(per_model_display.values()) / len(per_model_display)
+        else:
+            similarity = 0.0
 
         results.append(
             SearchResultItem(
